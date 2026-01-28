@@ -1,0 +1,62 @@
+id: postgres_taxi_foreach
+namespace: zoomcamp
+description: |
+  Run the 04_postgres_taxi flow for each month in a given period (inclusive).
+
+inputs:
+  - id: taxi
+    type: SELECT
+    displayName: Select taxi type
+    values: [yellow, green]
+    defaults: yellow
+
+  - id: start
+    type: STRING
+    displayName: Start period (YYYY-MM)
+    defaults: "2019-01"
+
+  - id: end
+    type: STRING
+    displayName: End period (YYYY-MM)
+    defaults: "2019-03"
+
+tasks:
+  - id: build_months
+    type: io.kestra.plugin.scripts.python.Script
+    dependencies:
+      - kestra
+    script: |
+      from kestra import Kestra
+      from datetime import datetime
+
+      start = "{{inputs.start}}"
+      end = "{{inputs.end}}"
+
+      start_dt = datetime.strptime(start, "%Y-%m")
+      end_dt = datetime.strptime(end, "%Y-%m")
+      if end_dt < start_dt:
+          raise ValueError("end must be >= start")
+
+      months = []
+      cur = start_dt
+      while cur <= end_dt:
+          months.append({"year": cur.strftime("%Y"), "month": cur.strftime("%m")})
+          if cur.month == 12:
+              cur = cur.replace(year=cur.year + 1, month=1)
+          else:
+              cur = cur.replace(month=cur.month + 1)
+
+      Kestra.outputs({"months": months})
+
+  - id: foreach_month
+    type: io.kestra.plugin.core.flow.ForEach
+    values: "{{outputs.build_months.vars.months}}"
+    tasks:
+      - id: run_postgres_taxi
+        type: io.kestra.plugin.core.flow.Subflow
+        namespace: zoomcamp
+        flowId: postgres_taxi
+        inputs:
+          taxi: "{{inputs.taxi}}"
+          year: "{{fromJson(taskrun.value).year}}"
+          month: "{{fromJson(taskrun.value).month}}"
